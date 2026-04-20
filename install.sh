@@ -24,7 +24,7 @@
 set -euo pipefail
 
 # ─── Version ─────────────────────────────────────────────────────────────────
-JIAB_VERSION="1.0.0"
+JIAB_VERSION="1.0.1"
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 BASE_DIR="${JIAB_INSTALL_DIR:-$HOME/jack-in-a-box}"
@@ -74,13 +74,17 @@ MODE="install"
 SKIP_FIREWALL=false
 LITE_MODE=false
 COMPONENTS=""
-
+SKIP_NEXT=false
 for arg in "$@"; do
+    if $SKIP_NEXT; then
+        SKIP_NEXT=false
+        continue
+    fi
     case $arg in
         --check)          MODE="check" ;;
         --skip-firewall)  SKIP_FIREWALL=true ;;
         --lite)           LITE_MODE=true ;;
-        --components)     shift; COMPONENTS="$1" ;;
+        --components)     SKIP_NEXT=true; COMPONENTS="$2" ;;
         --help|-h)
             echo ""
             banner "  ╔══════════════════════════════════════════════════════╗"
@@ -181,10 +185,11 @@ ok "git $(git --version | awk '{print $3}')"
 # pip
 PIP=$(command -v pip3 || command -v pip || true)
 if [ -z "$PIP" ]; then
-    warn "pip not found — will try python3 -m pip"
-    PIP="$PYTHON -m pip"
+    warn "pip not found — trying python3 -m ensurepip..."
+    $PYTHON -m ensurepip --upgrade 2>/dev/null || true
+    PIP=$(command -v pip3 || command -v pip || echo "$PYTHON -m pip")
 fi
-ok "pip available"
+ok "pip available ($PIP)"
 
 # sudo (for DLM + crypto)
 if should_install dlm || should_install crypto; then
@@ -246,7 +251,7 @@ if should_install hermes; then
         cd "$HERMES_DIR"
         source venv/bin/activate
         if [ -f "requirements.txt" ]; then
-            pip install -r requirements.txt --quiet 2>/dev/null || warn "Some deps may need manual install"
+            $PIP install -r requirements.txt --quiet 2>/dev/null || warn "Some deps may need manual install"
         fi
         deactivate
         ok "Hermes dependencies installed"
@@ -273,10 +278,49 @@ settings:
 
 display:
   skin: "hermelin"
+
+memory:
+  provider: neural
+  neural:
+    embedding_backend: fastembed
+    use_cpp: false
 HERMESCFG
             ok "Default config at $HERMES_HOME/config.yaml"
         else
             ok "Existing config preserved"
+        fi
+
+        # Create .env if not exists
+        if [ ! -f "$HERMES_HOME/.env" ]; then
+            info "Creating .env template..."
+            cat > "$HERMES_HOME/.env" << 'ENVTEMPLATE'
+# Hermes Agent — API Keys
+# Fill in your keys. Never commit this file.
+
+# ─── Model Providers ─────────────────────────────────────
+# ANTHROPIC_API_KEY=
+# OPENROUTER_API_KEY=
+# OLLAMA_BASE_URL=http://localhost:11434
+
+# ─── Neural Memory ───────────────────────────────────────
+# MSSQL_SERVER=localhost
+# MSSQL_DATABASE=NeuralMemory
+# MSSQL_USERNAME=SA
+# MSSQL_PASSWORD=
+
+# ─── PULSE ───────────────────────────────────────────────
+# BRAVE_API_KEY=
+# GITHUB_TOKEN=
+# NEWSAPI_KEY=
+
+# ─── Jackrabbit Wonderland ───────────────────────────────
+# DLM_HOST=127.0.0.1
+# DLM_PORT=37373
+ENVTEMPLATE
+            chmod 600 "$HERMES_HOME/.env"
+            ok "Env template at $HERMES_HOME/.env"
+        else
+            ok "Existing .env preserved"
         fi
     fi
 fi
@@ -315,17 +359,17 @@ if should_install neural; then
         if [ -f "$NEURAL_DIR/install.sh" ] && [ -d "$HERMES_DIR" ]; then
             info "Installing Neural Memory plugin into hermes-agent..."
             cd "$NEURAL_DIR"
-            bash install.sh "$HERMES_DIR" 2>/dev/null || warn "Neural installer had issues — manual setup may be needed"
+            bash install.sh "$HERMES_DIR" || warn "Neural installer had issues — manual setup may be needed"
             ok "Neural Memory plugin installed"
         else
             warn "Neural Memory installer not found — manual plugin copy needed"
         fi
 
-        # Install Python deps
+        # Install Python deps (FastEmbed, not sentence-transformers)
         info "Installing Neural Memory Python dependencies..."
         cd "$HERMES_DIR"
         source venv/bin/activate
-        pip install sentence-transformers numpy --quiet 2>/dev/null || warn "Some ML deps may need manual install"
+        $PIP install fastembed numpy --quiet 2>/dev/null || warn "Some ML deps may need manual install"
         deactivate
         ok "Neural Memory dependencies installed"
     fi
@@ -370,7 +414,7 @@ if should_install pulse; then
         if [ -f "$PULSE_DIR/install.sh" ]; then
             info "Running PULSE installer..."
             cd "$PULSE_DIR"
-            bash install.sh 2>/dev/null || warn "PULSE installer had issues"
+            bash install.sh || warn "PULSE installer had issues — check output above"
             ok "PULSE installed (skill + CLI)"
         fi
     fi
@@ -428,7 +472,7 @@ if should_install dlm; then
         # Systemd service (if not exists)
         if [ ! -f "/etc/systemd/system/jackrabbit-dlm@$USER.service" ]; then
             info "Creating systemd service for DLM..."
-            sudo tee /etc/systemd/system/jackrabbit-dlm@.service > /dev/null << 'DLMSVC'
+            sudo tee /etc/systemd/system/jackrabbit-dlm@.service > /dev/null << DLMSVC
 [Unit]
 Description=JackrabbitDLM Volatile Key Vault (%i)
 After=network.target
@@ -436,8 +480,8 @@ After=network.target
 [Service]
 Type=simple
 User=%i
-WorkingDirectory=/home/JackrabbitDLM
-ExecStart=/usr/bin/python3 /home/JackrabbitDLM/JackrabbitDLM 0.0.0.0 37373
+WorkingDirectory=$DLM_DIR
+ExecStart=/usr/bin/python3 $DLM_DIR/JackrabbitDLM 0.0.0.0 $DLM_PORT
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
@@ -493,7 +537,7 @@ if should_install crypto; then
         info "Installing pycryptodome..."
         cd "$HERMES_DIR"
         source venv/bin/activate 2>/dev/null || true
-        pip install pycryptodome --quiet 2>/dev/null || $PYTHON -m pip install pycryptodome --quiet
+        $PIP install pycryptodome --quiet 2>/dev/null || $PYTHON -m pip install pycryptodome --quiet
         deactivate 2>/dev/null || true
         ok "pycryptodome installed"
 
@@ -501,10 +545,10 @@ if should_install crypto; then
         if [ -f "$JRWL_DIR/install.sh" ]; then
             info "Running JRWL installer..."
             cd "$JRWL_DIR"
-            sudo bash install.sh --no-firewall 2>/dev/null || {
+            sudo bash install.sh --no-firewall || {
                 warn "JRWL installer had issues — deploying manually..."
                 sudo mkdir -p /opt/hermes-crypto
-                sudo cp "$JRWL_DIR"/*.py /opt/hermes-crypto/
+                sudo cp "$JRWL_DIR"/*.py /opt/hermes-crypto/ 2>/dev/null || true
                 sudo cp "$JRWL_DIR"/install.sh /opt/hermes-crypto/ 2>/dev/null || true
                 sudo chmod +x /opt/hermes-crypto/*.py 2>/dev/null || true
             }
@@ -599,11 +643,11 @@ fi
 
 # ─── Integration: Link JRWL as Hermes skill ──────────────────────────────────
 if should_install crypto && [ -d "$JRWL_DIR" ]; then
-    JRWL_SKILL_DIR="$SKILLS_DIR/devops/hermes-crypto"
+    JRWL_SKILL_DIR="$SKILLS_DIR/devops/jackrabbit-wonderland"
     if [ ! -L "$JRWL_SKILL_DIR" ] && [ ! -d "$JRWL_SKILL_DIR" ]; then
         info "Linking JRWL as Hermes skill..."
         ln -sf "$JRWL_DIR" "$JRWL_SKILL_DIR"
-        ok "JRWL skill linked"
+        ok "JRWL skill linked (jackrabbit-wonderland)"
     else
         ok "JRWL skill already linked"
     fi
@@ -659,9 +703,9 @@ echo -e "${BOLD}${CYAN}  ╩╩ ╩╚═╝╚═╝╩ ╩╚═╝═╩╝  
 echo ""
 
 # 1. Start DLM if available and not running
-if [ -d "/home/JackrabbitDLM" ] && ! ss -tlnp 2>/dev/null | grep -q ":37373 "; then
+if [ -d "$BASE_DIR/jackrabbit-dlm" ] && ! ss -tlnp 2>/dev/null | grep -q ":37373 "; then
     echo -e "  ${CYAN}→${NC} Starting JackrabbitDLM..."
-    cd /home/JackrabbitDLM
+    cd "$BASE_DIR/jackrabbit-dlm"
     python3 JackrabbitDLM 0.0.0.0 37373 &
     sleep 2
     echo -e "  ${GREEN}✓${NC} DLM running on port 37373"
