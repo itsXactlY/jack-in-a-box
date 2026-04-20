@@ -250,6 +250,8 @@ if should_install hermes; then
         info "Installing hermes dependencies..."
         cd "$HERMES_DIR"
         source venv/bin/activate
+        # Ensure critical deps first (before requirements.txt)
+        $PIP install python-dotenv --quiet 2>/dev/null || true
         if [ -f "requirements.txt" ]; then
             $PIP install -r requirements.txt --quiet 2>/dev/null || warn "Some deps may need manual install"
         fi
@@ -716,6 +718,7 @@ if [ -d "$BASE_DIR/hermes-agent" ]; then
     echo -e "  ${GREEN}✓${NC} Launching Hermes Agent..."
     cd "$BASE_DIR/hermes-agent"
     source venv/bin/activate 2>/dev/null || true
+    export PYTHONPATH="$BASE_DIR/hermes-agent:${PYTHONPATH:-}"
     python3 -m hermes_cli.main "$@"
 fi
 LAUNCHER
