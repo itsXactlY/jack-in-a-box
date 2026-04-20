@@ -264,22 +264,29 @@ if should_install hermes; then
             info "Creating default hermes config..."
             cat > "$HERMES_HOME/config.yaml" << 'HERMESCFG'
 # Hermes Agent — Jack-in-a-Box default config
-# Edit this file to configure providers, models, and settings.
+# Run 'hermes setup' or 'hermes model' to change provider/model.
+
+model:
+  api_key: ""
+  base_url: https://api.kilo.ai/api/gateway
+  default_model: kilo-auto/free
+  provider: kilo
 
 providers:
-  # Add your providers here
-  # Example:
-  # openrouter:
-  #   api_key: "${OPENROUTER_API_KEY}"
-  #   base_url: "https://openrouter.ai/api/v1"
+  kilo:
+    api: https://api.kilo.ai/api/gateway
+    api_key: ""
+    default_model: kilo-auto/free
+    name: Kilo Code
+    transport: chat_completions
 
 settings:
-  default_model: "anthropic/claude-sonnet-4"
-  max_iterations: 90
-  skin: "hermelin"
+  default_model: kilo-auto/free
+  max_iterations: 30
+  skin: hermelin
 
 display:
-  skin: "hermelin"
+  skin: hermelin
 
 memory:
   provider: neural
@@ -300,7 +307,7 @@ HERMESCFG
 # Fill in your keys. Never commit this file.
 
 # ─── Model Providers ─────────────────────────────────────
-# ANTHROPIC_API_KEY=
+# KILOCODE_API_KEY=
 # OPENROUTER_API_KEY=
 # OLLAMA_BASE_URL=http://localhost:11434
 
@@ -719,7 +726,11 @@ if [ -d "$BASE_DIR/hermes-agent" ]; then
     cd "$BASE_DIR/hermes-agent"
     source venv/bin/activate 2>/dev/null || true
     export PYTHONPATH="$BASE_DIR/hermes-agent:${PYTHONPATH:-}"
-    python3 -m hermes_cli.main "$@"
+    if [ $# -eq 0 ]; then
+        python3 -m hermes_cli.main chat -m kilo-auto/free
+    else
+        python3 -m hermes_cli.main "$@"
+    fi
 fi
 LAUNCHER
     chmod +x "$LAUNCHER"
