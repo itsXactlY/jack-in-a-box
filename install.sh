@@ -379,23 +379,18 @@ if should_install neural; then
         fi
         ok "Neural Memory at $NEURAL_DIR"
 
-        # Install into hermes-agent using the built-in installer
+        # Install into hermes-agent using the built-in installer (symlink-based)
         if [ -f "$NEURAL_DIR/install.sh" ] && [ -d "$HERMES_DIR" ]; then
             info "Installing Neural Memory plugin into hermes-agent..."
             cd "$NEURAL_DIR"
-            bash install.sh "$HERMES_DIR" || warn "Neural installer had issues — manual setup may be needed"
+            bash install.sh install || warn "Neural installer had issues — manual setup may be needed"
             ok "Neural Memory plugin installed"
         else
             warn "Neural Memory installer not found — manual plugin copy needed"
         fi
 
-        # Install Python deps (FastEmbed, not sentence-transformers)
-        info "Installing Neural Memory Python dependencies..."
-        cd "$HERMES_DIR"
-        source venv/bin/activate
-        $PIP install fastembed numpy --quiet 2>/dev/null || warn "Some ML deps may need manual install"
-        deactivate
-        ok "Neural Memory dependencies installed"
+        # Python deps are handled by the neural-memory install.sh
+        # (FastEmbed, numpy, torch if CUDA detected — all automatic)
     fi
 fi
 
