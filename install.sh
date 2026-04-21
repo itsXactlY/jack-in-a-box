@@ -23,6 +23,21 @@
 # ══════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
+# ─── Root check — NO EXCEPTIONS ─────────────────────────────────────────────
+if [ "$(id -u)" -eq 0 ]; then
+    echo ""
+    echo "╔══════════════════════════════════════════════════╗"
+    echo "║  DO NOT RUN AS ROOT.                             ║"
+    echo "║                                                  ║"
+    echo "║  Jack-in-a-box creates venvs and writes to       ║"
+    echo "║  ~/.hermes/ and ~/jack-in-a-box/. Root would     ║"
+    echo "║  break permissions and pip path detection.       ║"
+    echo "║                                                  ║"
+    echo "║  Run as normal user:  bash install.sh            ║"
+    echo "╚══════════════════════════════════════════════════╝"
+    exit 1
+fi
+
 # ─── Version ─────────────────────────────────────────────────────────────────
 JIAB_VERSION="1.0.1"
 
