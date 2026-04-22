@@ -39,7 +39,7 @@ if [ "$(id -u)" -eq 0 ]; then
 fi
 
 # ─── Version ─────────────────────────────────────────────────────────────────
-JIAB_VERSION="1.0.1"
+JIAB_VERSION="1.0.4"
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 BASE_DIR="${JIAB_INSTALL_DIR:-$HOME/jack-in-a-box}"
@@ -261,17 +261,55 @@ if should_install hermes; then
             ok "Virtual environment created"
         fi
 
-        # Install dependencies
+        # Install dependencies — use venv pip (activated)
         info "Installing hermes dependencies..."
         cd "$HERMES_DIR"
         source venv/bin/activate
-        # Ensure critical deps first (before requirements.txt)
-        $PIP install python-dotenv --quiet 2>/dev/null || true
-        if [ -f "requirements.txt" ]; then
-            $PIP install -r requirements.txt --quiet 2>/dev/null || warn "Some deps may need manual install"
+        # venv pip bypasses externally-managed check on Debian 12
+        VENV_PIP="$HERMES_DIR/venv/bin/pip"
+        if [ -f "$VENV_PIP" ]; then
+            $VENV_PIP install --upgrade pip 2>/dev/null || true
+            $VENV_PIP install python-dotenv 2>/dev/null || true
+            if [ -f "requirements.txt" ]; then
+                $VENV_PIP install -r requirements.txt 2>/dev/null || warn "Some deps may need manual install"
+            fi
+        else
+            warn "venv pip not found — falling back to venv python -m pip"
+            python3 -m pip install --upgrade pip 2>/dev/null || true
+            python3 -m pip install python-dotenv 2>/dev/null || true
         fi
         deactivate
         ok "Hermes dependencies installed"
+
+        # Install hermes as a command (console script entry point)
+        info "Installing hermes CLI command..."
+        cd "$HERMES_DIR"
+        source venv/bin/activate
+        if [ -f "pyproject.toml" ]; then
+            $VENV_PIP install -e . --quiet 2>/dev/null || $VENV_PIP install -e . || warn "Could not install hermes as command"
+        fi
+        deactivate
+        # Symlink hermes to ~/.local/bin if not installed as entry point
+        if ! command -v hermes &>/dev/null; then
+            mkdir -p "$HOME/.local/bin"
+            cat > "$HOME/.local/bin/hermes" << 'HERMESCMD'
+#!/usr/bin/env bash
+# Hermes Agent — Quick launcher
+# Auto-activates venv and runs hermes CLI
+HERMES_DIR="$(cd "$(dirname "$0")/.." && pwd)/hermes-agent"
+if [ -f "$HERMES_DIR/venv/bin/activate" ]; then
+    source "$HERMES_DIR/venv/bin/activate"
+fi
+export PYTHONPATH="$HERMES_DIR:${PYTHONPATH:-}"
+cd "$HERMES_DIR"
+exec python3 -m hermes_cli.main "$@"
+HERMESCMD
+            chmod +x "$HOME/.local/bin/hermes"
+            export PATH="$HOME/.local/bin:$PATH"
+            ok "hermes command installed to ~/.local/bin/hermes"
+        else
+            ok "hermes command available ($(command -v hermes))"
+        fi
 
         # Setup hermes config
         mkdir -p "$HERMES_HOME"
@@ -470,6 +508,8 @@ if should_install dlm; then
             info "Cloning JackrabbitDLM..."
             sudo git clone "$DLM_REPO" "$DLM_DIR" 2>/dev/null || git clone "$DLM_REPO" "$DLM_DIR"
             sudo chmod -R 755 "$DLM_DIR" 2>/dev/null || true
+            # Fix ownership: sudo git clone creates root-owned files, but DLM runs as $USER
+            sudo chown -R $(id -un):$(id -gn) "$DLM_DIR" 2>/dev/null || true
         fi
         ok "DLM at $DLM_DIR"
 
@@ -571,7 +611,16 @@ if should_install crypto; then
         info "Installing pycryptodome..."
         cd "$HERMES_DIR"
         source venv/bin/activate 2>/dev/null || true
-        $PIP install pycryptodome --quiet 2>/dev/null || $PYTHON -m pip install pycryptodome --quiet
+        # Install pycryptodome into hermes-agent venv (bypass activation to avoid externally-managed issues)
+        if [ -f "$HERMES_DIR/venv/bin/pip" ]; then
+            $HERMES_DIR/venv/bin/pip install --quiet pycryptodome 2>/dev/null \
+                || $HERMES_DIR/venv/bin/pip install pycryptodome
+        else
+            $PIP install --break-system-packages pycryptodome --quiet 2>/dev/null \
+                || $PYTHON -m pip install --break-system-packages pycryptodome --quiet 2>/dev/null \
+                || $PIP install pycryptodome --quiet 2>/dev/null
+        fi
+        ok "pycryptodome installed"
         deactivate 2>/dev/null || true
         ok "pycryptodome installed"
 
@@ -744,9 +793,14 @@ echo -e "${BOLD}${CYAN}  ╩╩ ╩╚═╝╚═╝╩ ╩╚═╝═╩╝  
 echo ""
 
 # 1. Start DLM if available and not running
-if [ -d "$BASE_DIR/jackrabbit-dlm" ] && ! ss -tlnp 2>/dev/null | grep -q ":37373 "; then
+# DLM installs to /home/JackrabbitDLM (not $BASE_DIR)
+DLM_LAUNCH_DIR=""
+for d in /home/JackrabbitDLM "$HOME/jack-in-a-box/jackrabbit-dlm"; do
+    [ -f "$d/JackrabbitDLM" ] && DLM_LAUNCH_DIR="$d" && break
+done
+if [ -n "$DLM_LAUNCH_DIR" ] && ! ss -tlnp 2>/dev/null | grep -q ":37373 "; then
     echo -e "  ${CYAN}→${NC} Starting JackrabbitDLM..."
-    cd "$BASE_DIR/jackrabbit-dlm"
+    cd "$DLM_LAUNCH_DIR"
     python3 JackrabbitDLM 0.0.0.0 37373 &
     sleep 2
     echo -e "  ${GREEN}✓${NC} DLM running on port 37373"
@@ -755,13 +809,28 @@ fi
 # 2. Start Hermes Agent
 if [ -d "$BASE_DIR/hermes-agent" ]; then
     echo -e "  ${GREEN}✓${NC} Launching Hermes Agent..."
+    # Try installed hermes command first, then python3 -m hermes_cli.main
+    HERMES_BIN=""
+    if command -v hermes &>/dev/null; then
+        HERMES_BIN="hermes"
+    elif [ -f "$BASE_DIR/hermes-agent/venv/bin/hermes" ]; then
+        HERMES_BIN="$BASE_DIR/hermes-agent/venv/bin/hermes"
+    fi
     cd "$BASE_DIR/hermes-agent"
-    source venv/bin/activate 2>/dev/null || true
-    export PYTHONPATH="$BASE_DIR/hermes-agent:${PYTHONPATH:-}"
-    if [ $# -eq 0 ]; then
-        python3 -m hermes_cli.main chat -m kilo-auto/free
+    if [ -n "$HERMES_BIN" ]; then
+        if [ $# -eq 0 ]; then
+            $HERMES_BIN chat -m kilo-auto/free
+        else
+            $HERMES_BIN "$@"
+        fi
     else
-        python3 -m hermes_cli.main "$@"
+        source venv/bin/activate 2>/dev/null || true
+        export PYTHONPATH="$BASE_DIR/hermes-agent:${PYTHONPATH:-}"
+        if [ $# -eq 0 ]; then
+            python3 -m hermes_cli.main chat -m kilo-auto/free
+        else
+            python3 -m hermes_cli.main "$@"
+        fi
     fi
 fi
 LAUNCHER
