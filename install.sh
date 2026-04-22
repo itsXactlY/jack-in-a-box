@@ -473,6 +473,20 @@ if should_install dlm; then
         fi
         ok "DLM at $DLM_DIR"
 
+        # Install DLM dependencies (psutil) — must work on externally-managed Python (Debian 12)
+        info "Installing DLM dependencies..."
+        if [ -f "$DLM_DIR/requirements.txt" ]; then
+            $PIP install --break-system-packages -r "$DLM_DIR/requirements.txt" 2>/dev/null \
+                || $PYTHON -m pip install --break-system-packages -r "$DLM_DIR/requirements.txt" 2>/dev/null \
+                || warn "Could not install DLM dependencies (psutil may already be installed)"
+            ok "DLM dependencies installed"
+        else
+            # Fallback: just psutil if no requirements.txt
+            $PIP install --break-system-packages psutil 2>/dev/null \
+                || $PYTHON -m pip install --break-system-packages psutil 2>/dev/null \
+                || true
+        fi
+
         # Start DLM as a background process if not running
         if ! ss -tlnp 2>/dev/null | grep -q ":$DLM_PORT "; then
             info "Starting JackrabbitDLM on port $DLM_PORT..."
