@@ -289,23 +289,20 @@ if should_install hermes; then
             $VENV_PIP install -e . --quiet 2>/dev/null || $VENV_PIP install -e . || warn "Could not install hermes as command"
         fi
         deactivate
-        # Symlink hermes to ~/.local/bin if not installed as entry point
-        if ! command -v hermes &>/dev/null; then
-            mkdir -p "$HOME/.local/bin"
-            cat > "$HOME/.local/bin/hermes" << 'HERMESCMD'
+        # Create a launcher wrapper that uses hardcoded path (works regardless of PATH)
+        mkdir -p "$HOME/.local/bin"
+        if ! command -v hermes &>/dev/null || [ "$(command -v hermes)" != "$HERMES_DIR/venv/bin/hermes" ]; then
+            cat > "$HOME/.local/bin/hermes" << HERMESCMD
 #!/usr/bin/env bash
 # Hermes Agent — Quick launcher
-# Auto-activates venv and runs hermes CLI
-HERMES_DIR="$(cd "$(dirname "$0")/.." && pwd)/hermes-agent"
-if [ -f "$HERMES_DIR/venv/bin/activate" ]; then
-    source "$HERMES_DIR/venv/bin/activate"
-fi
-export PYTHONPATH="$HERMES_DIR:${PYTHONPATH:-}"
-cd "$HERMES_DIR"
-exec python3 -m hermes_cli.main "$@"
+# Hardcoded path: works regardless of PATH settings
+HERMES_DIR="$HERMES_DIR"
+source "\$HERMES_DIR/venv/bin/activate"
+export PYTHONPATH="\$HERMES_DIR:\${PYTHONPATH:-}"
+cd "\$HERMES_DIR"
+exec python3 -m hermes_cli.main "\$@"
 HERMESCMD
             chmod +x "$HOME/.local/bin/hermes"
-            export PATH="$HOME/.local/bin:$PATH"
             ok "hermes command installed to ~/.local/bin/hermes"
         else
             ok "hermes command available ($(command -v hermes))"

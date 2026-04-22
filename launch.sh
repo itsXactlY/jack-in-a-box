@@ -33,7 +33,7 @@ fi
 # 2. Start Hermes Agent
 if [ -d "$BASE_DIR/hermes-agent" ]; then
     echo -e "  ${GREEN}✓${NC} Launching Hermes Agent..."
-    # Try installed hermes command first, then python3 -m hermes_cli.main
+    # Try installed hermes command first, then venv python3 -m hermes_cli.main
     HERMES_BIN=""
     if command -v hermes &>/dev/null; then
         HERMES_BIN="hermes"
