@@ -53,11 +53,11 @@ JRWL_REPO="https://github.com/itsXactlY/Jackrabbit-wonderland.git"
 JRWL_BRANCH="main"
 DLM_REPO="https://github.com/rapmd73/JackrabbitDLM.git"
 
-HERMES_DIR="$BASE_DIR/hermes-agent"
-NEURAL_DIR="$BASE_DIR/neural-memory"
-PULSE_DIR="$BASE_DIR/pulse"
-JRWL_DIR="$BASE_DIR/jackrabbit-wonderland"
-DLM_DIR="/home/JackrabbitDLM"
+HERMES_DIR="${HERMES_DIR:-$BASE_DIR/hermes-agent}"
+NEURAL_DIR="${NEURAL_DIR:-$BASE_DIR/neural-memory}"
+PULSE_DIR="${PULSE_DIR:-$BASE_DIR/pulse}"
+JRWL_DIR="${JRWL_DIR:-$BASE_DIR/jackrabbit-wonderland}"
+DLM_DIR="${DLM_DIR:-/home/JackrabbitDLM}"
 
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 SKILLS_DIR="$HERMES_HOME/skills"
@@ -404,25 +404,23 @@ if should_install pulse; then
     if [ "$MODE" = "check" ]; then
         if [ -d "$PULSE_DIR/.git" ] && [ -f "$PULSE_DIR/install.sh" ]; then
             ok "PULSE at $PULSE_DIR"
-            if [ -L "$SKILLS_DIR/devops/pulse" ] || [ -d "$SKILLS_DIR/devops/pulse" ]; then
-                ok "PULSE skill linked"
-            else
-                warn "PULSE skill not linked"
-            fi
-            if [ -L "$HOME/.local/bin/pulse" ]; then
-                ok "PULSE CLI available"
-            else
-                warn "PULSE CLI not linked"
-            fi
+            info "Running PULSE installer check..."
+            (cd "$PULSE_DIR" && bash install.sh --check)
+            ok "PULSE installer check passed"
         else
             fail "PULSE not installed"
         fi
     else
         if [ -d "$PULSE_DIR/.git" ]; then
-            info "PULSE already cloned — pulling latest..."
+            info "PULSE already cloned at $PULSE_DIR"
             cd "$PULSE_DIR"
-            git fetch origin
-            git pull origin main --ff-only 2>/dev/null || warn "Could not fast-forward"
+            if git diff --quiet && git diff --cached --quiet; then
+                info "PULSE clean — pulling latest..."
+                git fetch origin
+                git pull origin main --ff-only
+            else
+                warn "PULSE has local changes — skipping pull to avoid overwriting work"
+            fi
         else
             info "Cloning PULSE..."
             git clone "$PULSE_REPO" "$PULSE_DIR"
@@ -433,8 +431,11 @@ if should_install pulse; then
         if [ -f "$PULSE_DIR/install.sh" ]; then
             info "Running PULSE installer..."
             cd "$PULSE_DIR"
-            bash install.sh || warn "PULSE installer had issues — check output above"
+            bash install.sh
             ok "PULSE installed (skill + CLI)"
+        else
+            fail "PULSE installer missing at $PULSE_DIR/install.sh"
+            exit 1
         fi
     fi
 fi
@@ -609,11 +610,13 @@ echo ""
 ERRORS=0
 
 # Hermes
-if [ -d "$HERMES_DIR" ] && [ -f "$HERMES_DIR/run_agent.py" ]; then
-    ok "Hermes Agent ✓"
-else
-    fail "Hermes Agent ✗"
-    ERRORS=$((ERRORS + 1))
+if should_install hermes; then
+    if [ -d "$HERMES_DIR" ] && [ -f "$HERMES_DIR/run_agent.py" ]; then
+        ok "Hermes Agent ✓"
+    else
+        fail "Hermes Agent ✗"
+        ERRORS=$((ERRORS + 1))
+    fi
 fi
 
 # Neural Memory
@@ -629,7 +632,12 @@ fi
 # PULSE
 if should_install pulse; then
     if [ -d "$PULSE_DIR" ] && [ -f "$PULSE_DIR/install.sh" ]; then
-        ok "PULSE ✓"
+        if [ -x "$HOME/.local/bin/pulse" ] && "$HOME/.local/bin/pulse" --diagnose >/dev/null 2>&1; then
+            ok "PULSE ✓"
+        else
+            fail "PULSE ✗ (CLI diagnostics failed)"
+            ERRORS=$((ERRORS + 1))
+        fi
     else
         fail "PULSE ✗"
         ERRORS=$((ERRORS + 1))
@@ -798,3 +806,7 @@ fi
 echo ""
 echo -e "  ${DIM}The human built the floor. The agent builds the rest.${NC}"
 echo ""
+
+if [ $ERRORS -ne 0 ]; then
+    exit 1
+fi
