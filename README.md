@@ -1,8 +1,10 @@
-# JACK-IN-A-BOX v1.0.3
+# JACK-IN-A-BOX v2.0.0-dev
 
 > **THE HERMES STACK — Everything springs to life from a single command.**
 
 A standalone all-in-one installer that clones, installs, and wires together the complete Hermes ecosystem into a working system. VM-tested on Debian 12.
+
+**v2 dev branch (`dev/mazemaker-v2-stack`):** swaps the V1 in-process neural-memory for the **Mazemaker V2 customer pod** (4 systemd-Quadlet containers, browser-onboard, license JWT, dream engine). V1 remains opt-in via `--components neural`.
 
 ---
 
@@ -11,7 +13,9 @@ A standalone all-in-one installer that clones, installs, and wires together the 
 | Component | Repository | Purpose |
 |-----------|-----------|---------|
 | **Hermes Agent** | [itsXactlY/hermes-agent](https://github.com/itsXactlY/hermes-agent) (`dev/unified`) | The autonomous AI agent framework |
-| **Neural Memory** | [itsXactlY/neural-memory](https://github.com/itsXactlY/neural-memory) | Local semantic memory with knowledge graph |
+| **Mazemaker V2** *(default)* | [itsXactlY/mazemaker-v2-backend](https://github.com/itsXactlY/mazemaker-v2-backend) | Containerized customer pod — semantic memory, dream engine, Pro-tier license |
+| **Mazemaker engine** *(needed by V2)* | [itsXactlY/mazemaker](https://github.com/itsXactlY/mazemaker) | Engine source (cloned to `~/mazemaker-engine` for the mcp container) |
+| **Neural Memory V1** *(legacy)* | [itsXactlY/neural-memory](https://github.com/itsXactlY/neural-memory) | Pre-V2 in-process semantic memory — opt-in only |
 | **PULSE** | [itsXactlY/pulse-hermes](https://github.com/itsXactlY/pulse-hermes) | Autonomous social search engine (15+ sources, stdlib-only) |
 | **Jackrabbit Wonderland** | [itsXactlY/Jackrabbit-wonderland](https://github.com/itsXactlY/Jackrabbit-wonderland) | LAN gateway + AES256-GCM encrypted sessions |
 | **JackrabbitDLM** | [rapmd73/JackrabbitDLM](https://github.com/rapmd73/JackrabbitDLM) | Volatile key vault (port 37373) |
@@ -26,10 +30,27 @@ cd jack-in-a-box
 bash install.sh
 ```
 
-### Lite Mode (hermes + neural + pulse, no crypto)
+### Lite Mode (hermes + mazemaker + pulse, no crypto)
 
 ```bash
 bash install.sh --lite
+```
+
+### V2 dev branch (test before merging to master)
+
+```bash
+git clone https://github.com/itsXactlY/jack-in-a-box.git
+cd jack-in-a-box
+git checkout dev/mazemaker-v2-stack
+bash install.sh                       # default: hermes + mazemaker + pulse + dlm + crypto
+bash install.sh --components hermes,mazemaker  # minimal smoke test
+```
+
+The mazemaker step opens your browser for email + captcha onboarding;
+takes ~10 minutes total (image builds dominate). Verify when done:
+```bash
+systemctl --user is-active mazemaker-{pod,license-client,mcp,embedding-worker,wonderland}
+bash $HOME/jack-in-a-box/mazemaker-v2-stack/scripts/schema-test.sh
 ```
 
 ### Specific Components
